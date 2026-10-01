@@ -334,7 +334,7 @@ Imagine this **{fw_name}** project as a bustling, high-end restaurant:
 * 👨‍🍳 **The Kitchen Chefs (`Services`)**:
   The waiter doesn't cook the food! They pass the ticket into the kitchen. The **Service layer** does the real work: cooking the food, calculating prices, and applying recipes (business logic).
 
-* 🥬 **The Pantry & Refrigerator (`Models & Database`)**:
+* 🥫 **The Pantry & Refrigerator (`Models & Database`)**:
   Where are the ingredients stored? In the pantry! The **Model layer** grabs raw records from the database shelf and organizes them neatly so the chefs can use them.
 
 * 🔒 **The Security Guard (`Middleware`)**:

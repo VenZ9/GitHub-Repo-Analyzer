@@ -1,136 +1,202 @@
-/* ==========================================================================
-   Project DNA — Node Inspector Panel
-   Renders file metadata, symbols, dependencies, source code, and AI insights.
-   ========================================================================== */
+/**
+ * Project DNA — Node Inspector Component
+ * Displays selected node metadata, connections, raw source code, and AI blast radius insights.
+ */
 
-function resetInspector() {
-  document.getElementById('emptyInspectorState').classList.remove('hidden');
-  document.getElementById('nodeDetailContainer').classList.add('hidden');
-  document.getElementById('codeViewerContent').textContent = 'Select a node to inspect source code.';
-  document.getElementById('aiFileContent').innerHTML = '<p class="text-muted">Select a file to see AI architectural breakdown, blast radius analysis, and failure mode risks.</p>';
-}
+class NodeInspector {
+  constructor(options) {
+    this.onNavigateNode = options.onNavigateNode;
+    this.onTraceFromNode = options.onTraceFromNode;
+    this.onAskAiAboutNode = options.onAskAiAboutNode;
 
-function updateInspector(nodeId) {
-  const repo = AppState.currentRepo;
-  if (!repo) return;
-  
-  const node = (repo.graph.nodes || []).find(n => n.id === nodeId);
-  if (!node) return;
+    this.emptyState = document.getElementById('emptyInspectorState');
+    this.container = document.getElementById('nodeDetailContainer');
 
-  document.getElementById('emptyInspectorState').classList.add('hidden');
-  document.getElementById('nodeDetailContainer').classList.remove('hidden');
+    // Overview Elements
+    this.roleBadge = document.getElementById('nodeRoleBadge');
+    this.title = document.getElementById('nodeTitle');
+    this.path = document.getElementById('nodePath');
+    this.loc = document.getElementById('nodeLoc');
+    this.complexity = document.getElementById('nodeComplexity');
+    this.centrality = document.getElementById('nodeCentrality');
+    this.callersCount = document.getElementById('nodeCallersCount');
+    this.symbolsList = document.getElementById('nodeSymbolsList');
+    this.depsList = document.getElementById('nodeDepsList');
+    this.callersList = document.getElementById('nodeCallersList');
+    this.depsBadge = document.getElementById('depsBadge');
+    this.callersBadge = document.getElementById('callersBadge');
 
-  // Header
-  const roleBadge = document.getElementById('nodeRoleBadge');
-  roleBadge.textContent = node.role.toUpperCase();
-  roleBadge.className = `node-role-badge tree-node-role ${node.role}`;
-  document.getElementById('nodeTitle').textContent = node.label;
-  document.getElementById('nodePath').textContent = node.path;
+    // Code Elements
+    this.codePath = document.getElementById('codeFilePath');
+    this.codeViewer = document.getElementById('codeViewerContent');
+    this.btnCopyCode = document.getElementById('btnCopyCode');
 
-  // Metrics
-  document.getElementById('nodeLoc').textContent = node.loc;
-  document.getElementById('nodeComplexity').textContent = `${node.complexity}/100`;
-  document.getElementById('nodeCentrality').textContent = `${node.centrality}%`;
-  document.getElementById('nodeCallersCount').textContent = (node.dependents || []).length;
+    // AI Tab
+    this.aiFileContent = document.getElementById('aiFileContent');
 
-  // Symbols
-  const symbolsList = document.getElementById('nodeSymbolsList');
-  symbolsList.innerHTML = '';
-  const allSymbols = [...(node.exports || []), ...(node.functions || []), ...(node.classes || [])];
-  const uniqueSymbols = [...new Set(allSymbols)];
-  if (uniqueSymbols.length) {
-    uniqueSymbols.slice(0, 20).forEach(sym => {
-      const tag = document.createElement('span');
-      tag.className = 'symbol-tag';
-      tag.textContent = sym;
-      symbolsList.appendChild(tag);
-    });
-  } else {
-    symbolsList.innerHTML = '<span class="text-muted">No exported symbols detected.</span>';
+    // Action buttons
+    this.btnTraceFrom = document.getElementById('btnTraceFromNode');
+    this.btnAskAi = document.getElementById('btnAskAiAboutNode');
+
+    this.currentNode = null;
+    this.currentCode = '';
+
+    this._bindEvents();
   }
 
-  // Dependencies
-  renderConnectionList('nodeDepsList', node.dependencies || [], 'depsBadge');
-  renderConnectionList('nodeCallersList', node.dependents || [], 'callersBadge');
+  _bindEvents() {
+    // Tab switching
+    document.querySelectorAll('.inspector-tabs .tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.inspector-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.inspector-content .tab-pane').forEach(p => p.classList.remove('active'));
 
-  // Source code
-  const content = (repo.files_content || {})[node.path] || '// Source not available';
-  document.getElementById('codeFilePath').textContent = node.path;
-  document.getElementById('codeViewerContent').textContent = content;
+        btn.classList.add('active');
+        const targetId = btn.getAttribute('data-tab');
+        const pane = document.getElementById(targetId);
+        if (pane) pane.classList.add('active');
+      });
+    });
 
-  // AI insights
-  loadAiFileInsights(nodeId);
-}
+    if (this.btnTraceFrom) {
+      this.btnTraceFrom.addEventListener('click', () => {
+        if (this.currentNode && this.onTraceFromNode) {
+          this.onTraceFromNode(this.currentNode.id);
+        }
+      });
+    }
 
-function renderConnectionList(containerId, items, badgeId) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = '';
-  document.getElementById(badgeId).textContent = items.length;
+    if (this.btnAskAi) {
+      this.btnAskAi.addEventListener('click', () => {
+        if (this.currentNode && this.onAskAiAboutNode) {
+          this.onAskAiAboutNode(this.currentNode);
+        }
+      });
+    }
 
-  if (!items.length) {
-    container.innerHTML = '<span class="text-muted" style="font-size:11px">None</span>';
-    return;
+    if (this.btnCopyCode) {
+      this.btnCopyCode.addEventListener('click', () => {
+        if (this.currentCode) {
+          navigator.clipboard.writeText(this.currentCode);
+          this.btnCopyCode.textContent = 'Copied!';
+          setTimeout(() => { this.btnCopyCode.textContent = 'Copy'; }, 1500);
+        }
+      });
+    }
   }
 
-  items.forEach(item => {
-    const el = document.createElement('div');
-    el.className = 'connection-item';
-    el.textContent = item;
-    el.addEventListener('click', () => selectNode(item));
-    container.appendChild(el);
-  });
-}
+  setNode(node, sourceCode, aiExplanation) {
+    this.currentNode = node;
+    this.currentCode = sourceCode || '';
 
-async function loadAiFileInsights(nodeId) {
-  const container = document.getElementById('aiFileContent');
-  container.innerHTML = '<p class="text-muted">Generating AI architectural analysis...</p>';
-  
-  try {
-    const result = await apiPost('/api/explain-node', {
-      repo_id: AppState.currentRepoId,
-      node_id: nodeId,
-      custom_files: AppState.customFiles
-    });
-    container.innerHTML = renderMarkdown(result.explanation);
-  } catch (err) {
-    container.innerHTML = `<p class="text-muted">Could not load AI insights: ${err.message}</p>`;
+    if (!node) {
+      this.emptyState.classList.remove('hidden');
+      this.container.classList.add('hidden');
+      this.codePath.textContent = 'Select a file';
+      this.codeViewer.textContent = 'Select a node to inspect source code.';
+      this.aiFileContent.innerHTML = '<p class="text-muted">Select a file to see AI architectural breakdown, blast radius analysis, and failure mode risks.</p>';
+      return;
+    }
+
+    this.emptyState.classList.add('hidden');
+    this.container.classList.remove('hidden');
+
+    // Populate Overview
+    this.roleBadge.textContent = (node.role || 'UTIL').toUpperCase();
+    this.roleBadge.className = `node-role-badge ${node.role || 'util'}`;
+    this.title.textContent = node.label;
+    this.path.textContent = node.path;
+    this.loc.textContent = node.loc || 0;
+    this.complexity.textContent = `${node.complexity || 1}/100`;
+    this.centrality.textContent = `${node.centrality || 0}%`;
+    this.callersCount.textContent = (node.dependents || []).length;
+
+    // Symbols (functions, classes, routes)
+    this.symbolsList.innerHTML = '';
+    const symbols = [
+      ...(node.functions || []).map(f => `${f}()`),
+      ...(node.classes || []).map(c => `class ${c}`),
+      ...(node.components || []).map(cp => `<${cp}/>`),
+      ...(node.routes || []).map(r => `${r.method || 'GET'} ${r.path || '/'}`)
+    ];
+
+    if (symbols.length) {
+      symbols.slice(0, 12).forEach(sym => {
+        const tag = document.createElement('span');
+        tag.className = 'symbol-tag';
+        tag.textContent = sym;
+        this.symbolsList.appendChild(tag);
+      });
+    } else {
+      this.symbolsList.innerHTML = '<span style="color:#64748b; font-size:11px;">No declared exports or symbols.</span>';
+    }
+
+    // Dependencies (Imports)
+    this.depsList.innerHTML = '';
+    const deps = node.dependencies || [];
+    this.depsBadge.textContent = deps.length;
+    if (deps.length) {
+      deps.forEach(depPath => {
+        const item = document.createElement('div');
+        item.className = 'connection-item';
+        item.innerHTML = `<span>${depPath}</span><span style="color:#a855f7;">→</span>`;
+        item.addEventListener('click', () => {
+          if (this.onNavigateNode) this.onNavigateNode(depPath);
+        });
+        this.depsList.appendChild(item);
+      });
+    } else {
+      this.depsList.innerHTML = '<span style="color:#64748b; font-size:11px;">Zero dependencies.</span>';
+    }
+
+    // Callers (Dependents)
+    this.callersList.innerHTML = '';
+    const callers = node.dependents || [];
+    this.callersBadge.textContent = callers.length;
+    if (callers.length) {
+      callers.forEach(callerPath => {
+        const item = document.createElement('div');
+        item.className = 'connection-item';
+        item.innerHTML = `<span>${callerPath}</span><span style="color:#38bdf8;">←</span>`;
+        item.addEventListener('click', () => {
+          if (this.onNavigateNode) this.onNavigateNode(callerPath);
+        });
+        this.callersList.appendChild(item);
+      });
+    } else {
+      this.callersList.innerHTML = '<span style="color:#64748b; font-size:11px;">Leaf node (no direct callers).</span>';
+    }
+
+    // Populate Source Code
+    this.codePath.textContent = node.path;
+    this.codeViewer.textContent = sourceCode || '// Source code not available in preview';
+
+    // Populate AI Tab
+    if (aiExplanation) {
+      this.aiFileContent.innerHTML = this._formatMarkdown(aiExplanation);
+    } else {
+      this.aiFileContent.innerHTML = '<p class="text-muted">Loading AI File Intelligence...</p>';
+    }
+  }
+
+  setAiExplanation(text) {
+    if (this.aiFileContent) {
+      this.aiFileContent.innerHTML = this._formatMarkdown(text);
+    }
+  }
+
+  _formatMarkdown(md) {
+    if (!md) return '';
+    // Lightweight markdown parser for headers, lists, code, bold
+    let html = md
+      .replace(/### (.*?)\n/g, '<h3>$1</h3>')
+      .replace(/#### (.*?)\n/g, '<h4>$1</h4>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^\* (.*$)/gim, '<li>$1</li>')
+      .replace(/\n\n/g, '<br/>');
+    return html;
   }
 }
 
-function initInspector() {
-  // Tabs
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(btn.dataset.tab).classList.add('active');
-    });
-  });
-
-  // Copy code
-  document.getElementById('btnCopyCode').addEventListener('click', () => {
-    const code = document.getElementById('codeViewerContent').textContent;
-    navigator.clipboard.writeText(code).then(() => {
-      const btn = document.getElementById('btnCopyCode');
-      btn.textContent = 'Copied!';
-      setTimeout(() => btn.textContent = 'Copy', 1500);
-    });
-  });
-
-  // Trace from node
-  document.getElementById('btnTraceFromNode').addEventListener('click', () => {
-    if (!AppState.selectedNodeId) return;
-    if (!AppState.traceMode) toggleTraceMode();
-    AppState.traceStart = AppState.selectedNodeId;
-    document.getElementById('traceStatusText').textContent = `Source: ${AppState.selectedNodeId}. Now click the target node.`;
-  });
-
-  // Ask AI about node
-  document.getElementById('btnAskAiAboutNode').addEventListener('click', () => {
-    if (!AppState.selectedNodeId) return;
-    sendChatQuery(`Explain this file: ${AppState.selectedNodeId}`);
-  });
-}
-
-window.addEventListener('DOMContentLoaded', initInspector);
+window.NodeInspector = NodeInspector;

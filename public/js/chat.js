@@ -1,124 +1,165 @@
-/* ==========================================================================
-   Project DNA — AI Repository Chat Controller
-   Handles grounded Q&A, preset prompts, and markdown rendering.
-   ========================================================================== */
+/**
+ * Project DNA — AI Repository Chat Panel
+ * Manages conversational architectural Q&A, preset prompt pills,
+ * code citations, streaming typing animation, and graph node linking.
+ */
 
-let chatHistory = [];
+class AiChatPanel {
+  constructor(options) {
+    this.onSendQuery = options.onSendQuery;
+    this.onNodeClick = options.onNodeClick;
 
-function resetChatContext(repo) {
-  chatHistory = [];
-  const container = document.getElementById('chatMessages');
-  container.innerHTML = '';
-  
-  const meta = repo.metadata || {};
-  const tech = repo.technologies || {};
-  const frameworks = (tech.frameworks || []).map(f => f.name).join(', ') || 'Modern Stack';
-  
-  appendChatMessage('assistant', `Hello! I am your <strong>Project DNA Architectural Intelligence</strong> agent. I have analyzed <strong>${meta.title || 'this codebase'}</strong> (${tech.total_files || 0} files, ${(tech.total_lines_of_code || 0).toLocaleString()} LOC) built on <strong>${frameworks}</strong>.
+    this.panel = document.getElementById('aiChatPanel');
+    this.messagesContainer = document.getElementById('chatMessages');
+    this.input = document.getElementById('chatInput');
+    this.btnSend = document.getElementById('btnSendChat');
+    this.btnToggleExpand = document.getElementById('btnToggleChatExpand');
+    this.isExpanded = false;
 
-Ask any architectural question above or click any node in the graph to inspect blast radius, callers, and code previews.`);
-}
+    this._bindEvents();
+  }
 
-function appendChatMessage(role, htmlContent) {
-  const container = document.getElementById('chatMessages');
-  const msg = document.createElement('div');
-  msg.className = `chat-message ${role}`;
-  
-  const avatar = document.createElement('div');
-  avatar.className = 'message-avatar';
-  avatar.textContent = role === 'user' ? 'YOU' : 'DNA';
-  
-  const content = document.createElement('div');
-  content.className = 'message-content';
-  content.innerHTML = renderMarkdown(htmlContent);
-  
-  msg.appendChild(avatar);
-  msg.appendChild(content);
-  container.appendChild(msg);
-  container.scrollTop = container.scrollHeight;
-}
+  _bindEvents() {
+    // Expand / Collapse Toggle
+    if (this.btnToggleExpand) {
+      this.btnToggleExpand.addEventListener('click', () => {
+        this.isExpanded = !this.isExpanded;
+        if (this.isExpanded) {
+          this.panel.classList.add('expanded');
+          this.btnToggleExpand.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>`;
+        } else {
+          this.panel.classList.remove('expanded');
+          this.btnToggleExpand.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>`;
+        }
+      });
+    }
 
-function renderMarkdown(text) {
-  if (!text) return '';
-  let html = text;
-  
-  // Code blocks
-  html = html.replace(/```([\s\S]*?)```/g, (m, code) => `<pre><code>${escapeHtml(code.trim())}</code></pre>`);
-  
-  // Headers
-  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
-  html = html.replace(/^#### (.*$)/gim, '<h4>$1</h4>');
-  
-  // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  
-  // Lists
-  html = html.replace(/^\* (.*$)/gim, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>)/gims, '<ul>$1</ul>');
-  
-  // Paragraphs
-  html = html.split('\n\n').map(p => {
-    if (p.trim().startsWith('<h') || p.trim().startsWith('<ul') || p.trim().startsWith('<pre')) return p;
-    return `<p>${p.replace(/\n/g, '<br>')}</p>`;
-  }).join('');
-  
-  return html;
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-async function sendChatQuery(question) {
-  if (!question || !question.trim()) return;
-  
-  appendChatMessage('user', question);
-  document.getElementById('chatInput').value = '';
-  
-  // Show typing indicator
-  const container = document.getElementById('chatMessages');
-  const typing = document.createElement('div');
-  typing.className = 'chat-message assistant';
-  typing.id = 'typingIndicator';
-  typing.innerHTML = '<div class="message-avatar">DNA</div><div class="message-content"><em>Analyzing codebase graph...</em></div>';
-  container.appendChild(typing);
-  container.scrollTop = container.scrollHeight;
-
-  try {
-    const result = await apiPost('/api/chat', {
-      repo_id: AppState.currentRepoId,
-      question: question,
-      active_node_id: AppState.selectedNodeId,
-      custom_files: AppState.customFiles
+    // Preset Prompt Pills
+    document.querySelectorAll('.preset-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        const query = pill.getAttribute('data-query');
+        if (query) {
+          this.submitQuery(query);
+        }
+      });
     });
-    
-    document.getElementById('typingIndicator')?.remove();
-    appendChatMessage('assistant', result.reply);
-  } catch (err) {
-    document.getElementById('typingIndicator')?.remove();
-    appendChatMessage('assistant', `⚠️ Error: ${err.message}`);
+
+    // Send Button
+    if (this.btnSend) {
+      this.btnSend.addEventListener('click', () => {
+        const val = this.input.value.trim();
+        if (val) {
+          this.submitQuery(val);
+          this.input.value = '';
+        }
+      });
+    }
+
+    // Input Enter Key
+    if (this.input) {
+      this.input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const val = this.input.value.trim();
+          if (val) {
+            this.submitQuery(val);
+            this.input.value = '';
+          }
+        }
+      });
+    }
+
+    // Click on code tags in chat messages to focus on graph
+    this.messagesContainer.addEventListener('click', (e) => {
+      const codeElem = e.target.closest('code');
+      if (codeElem) {
+        const text = codeElem.textContent.trim().replace(/^`|`$/g, '');
+        if (this.onNodeClick && (text.includes('/') || text.endsWith('.ts') || text.endsWith('.py') || text.endsWith('.js'))) {
+          this.onNodeClick(text);
+        }
+      }
+    });
+  }
+
+  submitQuery(text) {
+    this.appendMessage('user', text);
+    // Show typing state
+    const typingId = this.appendTypingIndicator();
+
+    if (this.onSendQuery) {
+      this.onSendQuery(text, (reply) => {
+        this.removeTypingIndicator(typingId);
+        this.appendMessage('assistant', reply);
+      });
+    }
+  }
+
+  appendMessage(role, content) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `chat-message ${role}`;
+
+    const avatar = role === 'user' ? 'YOU' : 'DNA';
+    const parsedHtml = this._parseMarkdown(content);
+
+    msgDiv.innerHTML = `
+      <div class="message-avatar">${avatar}</div>
+      <div class="message-content">${parsedHtml}</div>
+    `;
+
+    this.messagesContainer.appendChild(msgDiv);
+    this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+  }
+
+  appendTypingIndicator() {
+    const id = `typing_${Date.now()}`;
+    const div = document.createElement('div');
+    div.id = id;
+    div.className = 'chat-message assistant';
+    div.innerHTML = `
+      <div class="message-avatar">DNA</div>
+      <div class="message-content" style="display:flex; align-items:center; gap:6px;">
+        <span class="pulse-dot"></span>
+        <span style="font-size:11px; color:#94a3b8;">Analyzing AST symbols and graph paths...</span>
+      </div>
+    `;
+    this.messagesContainer.appendChild(div);
+    this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+    return id;
+  }
+
+  removeTypingIndicator(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  }
+
+  _parseMarkdown(md) {
+    if (!md) return '';
+
+    // Convert code blocks
+    let text = md.replace(/```([\s\S]*?)```/g, (match, code) => {
+      return `<pre><code>${this._escapeHtml(code.trim())}</code></pre>`;
+    });
+
+    // Headers & Formatting
+    text = text
+      .replace(/### (.*?)\n/g, '<h3>$1</h3>')
+      .replace(/#### (.*?)\n/g, '<h4>$1</h4>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code title="Click to locate on graph" style="cursor:pointer; text-decoration:underline dotted rgba(56, 189, 248, 0.4);">$1</code>')
+      .replace(/^\* (.*$)/gim, '<li>$1</li>')
+      .replace(/\n\n/g, '<br/>');
+
+    return text;
+  }
+
+  _escapeHtml(str) {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }
 
-function initChat() {
-  document.getElementById('btnSendChat').addEventListener('click', () => {
-    sendChatQuery(document.getElementById('chatInput').value);
-  });
-
-  document.getElementById('chatInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') sendChatQuery(e.target.value);
-  });
-
-  document.querySelectorAll('.preset-pill').forEach(pill => {
-    pill.addEventListener('click', () => sendChatQuery(pill.dataset.query));
-  });
-
-  document.getElementById('btnToggleChatExpand').addEventListener('click', () => {
-    document.getElementById('aiChatPanel').classList.toggle('expanded');
-  });
-}
-
-window.addEventListener('DOMContentLoaded', initChat);
+window.AiChatPanel = AiChatPanel;

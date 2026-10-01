@@ -1,102 +1,159 @@
-/* ==========================================================================
-   Project DNA — File Tree Explorer
-   Renders hierarchical file tree with role badges and search filtering.
-   ========================================================================== */
+/**
+ * Project DNA — File Explorer Component
+ * Renders nested directory tree with role badges, LOC, search filtering,
+ * and bidirectional sync with the architecture graph.
+ */
 
-let currentFileTree = [];
-let currentRepoRef = null;
+class FileExplorer {
+  constructor(containerElement, onFileSelect) {
+    this.container = containerElement;
+    this.onFileSelect = onFileSelect;
+    this.files = [];
+    this.activePath = null;
+    this.filterQuery = '';
+    this.collapsedFolders = new Set();
+  }
 
-function renderFileTree(fileTree, repo) {
-  currentFileTree = fileTree;
-  currentRepoRef = repo;
-  const container = document.getElementById('fileTreeContainer');
-  container.innerHTML = '';
+  setFiles(fileList) {
+    this.files = fileList || [];
+    this.render();
+  }
 
-  // Build hierarchical structure
-  const root = { children: {}, files: [] };
-  
-  fileTree.forEach(f => {
-    const parts = f.path.split('/');
-    let node = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i];
-      if (!node.children[part]) node.children[part] = { children: {}, files: [] };
-      node = node.children[part];
+  setActiveFile(path) {
+    this.activePath = path;
+    const current = this.container.querySelector('.tree-node.active');
+    if (current) current.classList.remove('active');
+
+    if (path) {
+      const target = this.container.querySelector(`[data-path="${path}"]`);
+      if (target) {
+        target.classList.add('active');
+        target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
     }
-    node.files.push(f);
-  });
+  }
 
-  renderTreeNode(root, container, 0);
-}
+  setFilter(query) {
+    this.filterQuery = (query || '').toLowerCase().trim();
+    this.render();
+  }
 
-function renderTreeNode(node, container, depth) {
-  // Render directories
-  Object.keys(node.children).sort().forEach(dirName => {
-    const dirEl = document.createElement('div');
-    dirEl.className = 'tree-node tree-dir';
-    dirEl.style.paddingLeft = `${12 + depth * 12}px`;
-    dirEl.innerHTML = `<span class="tree-node-icon">📁</span><span class="tree-node-name">${dirName}</span>`;
-    container.appendChild(dirEl);
-    renderTreeNode(node.children[dirName], container, depth + 1);
-  });
+  render() {
+    this.container.innerHTML = '';
+    if (!this.files.length) {
+      this.container.innerHTML = `<div style="padding:16px; color:#64748b; font-size:12px; text-align:center;">No files found</div>`;
+      return;
+    }
 
-  // Render files
-  node.files.sort((a, b) => a.filename.localeCompare(b.filename)).forEach(f => {
-    const fileEl = document.createElement('div');
-    fileEl.className = 'tree-node tree-file';
-    fileEl.dataset.path = f.path;
-    fileEl.style.paddingLeft = `${12 + depth * 12}px`;
-    
-    const icon = getFileIcon(f.extension);
-    fileEl.innerHTML = `
-      <span class="tree-node-icon">${icon}</span>
-      <span class="tree-node-name">${f.filename}</span>
-      <span class="tree-node-role ${f.role}">${f.role}</span>
-    `;
-    
-    fileEl.addEventListener('click', () => {
-      document.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
-      fileEl.classList.add('active');
-      selectNode(f.path);
+    // Filter files if query is present
+    const filtered = this.files.filter(f => {
+      if (!this.filterQuery) return true;
+      return f.path.toLowerCase().includes(this.filterQuery) || 
+             f.filename.toLowerCase().includes(this.filterQuery) ||
+             (f.role && f.role.toLowerCase().includes(this.filterQuery));
     });
-    
-    container.appendChild(fileEl);
-  });
+
+    // Build directory tree
+    const root = { name: '', isDir: true, children: {}, files: [] };
+
+    filtered.forEach(file => {
+      const parts = file.path.split('/');
+      let curr = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const folder = parts[i];
+        if (!curr.children[folder]) {
+          curr.children[folder] = {
+            name: folder,
+            path: parts.slice(0, i + 1).join('/'),
+            isDir: true,
+            children: {},
+            files: []
+          };
+        }
+        curr = curr.children[folder];
+      }
+      curr.files.push(file);
+    });
+
+    // Recursively render tree DOM
+    const frag = document.createDocumentFragment();
+    this._renderDirectory(root, frag, 0);
+    this.container.appendChild(frag);
+  }
+
+  _renderDirectory(dirNode, parentElem, depth) {
+    // Render subfolders
+    const folderNames = Object.keys(dirNode.children).sort();
+    folderNames.forEach(folderName => {
+      const subDir = dirNode.children[folderName];
+      const isCollapsed = this.collapsedFolders.has(subDir.path);
+
+      const folderRow = document.createElement('div');
+      folderRow.className = 'tree-node folder-node';
+      folderRow.style.paddingLeft = `${12 + depth * 14}px`;
+      folderRow.innerHTML = `
+        <span class="tree-node-icon">${isCollapsed ? '▶' : '▼'}</span>
+        <span class="tree-node-icon">📁</span>
+        <span class="tree-node-name" style="font-weight:600; color:#94a3b8;">${folderName}</span>
+      `;
+
+      folderRow.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (this.collapsedFolders.has(subDir.path)) {
+          this.collapsedFolders.delete(subDir.path);
+        } else {
+          this.collapsedFolders.add(subDir.path);
+        }
+        this.render();
+      });
+
+      parentElem.appendChild(folderRow);
+
+      if (!isCollapsed) {
+        this._renderDirectory(subDir, parentElem, depth + 1);
+      }
+    });
+
+    // Render files
+    dirNode.files.sort((a, b) => a.filename.localeCompare(b.filename)).forEach(file => {
+      const fileRow = document.createElement('div');
+      fileRow.className = `tree-node file-node ${file.path === this.activePath ? 'active' : ''}`;
+      fileRow.setAttribute('data-path', file.path);
+      fileRow.style.paddingLeft = `${12 + depth * 14}px`;
+
+      const roleClass = file.role || 'util';
+      const fileIcon = this._getFileIcon(file.extension);
+
+      fileRow.innerHTML = `
+        <span class="tree-node-icon">${fileIcon}</span>
+        <span class="tree-node-name" title="${file.path}">${file.filename}</span>
+        <span class="tree-node-role ${roleClass}">${file.role || 'FILE'}</span>
+      `;
+
+      fileRow.addEventListener('click', () => {
+        this.setActiveFile(file.path);
+        if (this.onFileSelect) {
+          this.onFileSelect(file.path);
+        }
+      });
+
+      parentElem.appendChild(fileRow);
+    });
+  }
+
+  _getFileIcon(ext) {
+    switch (ext) {
+      case '.ts': case '.tsx': return '🔷';
+      case '.js': case '.jsx': return '🟨';
+      case '.py': return '🐍';
+      case '.go': return '🐹';
+      case '.rs': return '🦀';
+      case '.java': case '.kt': return '☕';
+      case '.json': return '📋';
+      case '.md': return '📝';
+      default: return '📄';
+    }
+  }
 }
 
-function getFileIcon(ext) {
-  const icons = {
-    '.ts': '🟦', '.tsx': '⚛️', '.js': '🟨', '.jsx': '⚛️',
-    '.py': '🐍', '.go': '🐹', '.rs': '🦀', '.java': '☕',
-    '.kt': '🟪', '.json': '📋', '.md': '📖', '.css': '🎨',
-    '.html': '🌐', '.yml': '⚙️', '.yaml': '⚙️', '.toml': '⚙️'
-  };
-  return icons[ext] || '📄';
-}
-
-function initExplorer() {
-  const searchInput = document.getElementById('fileSearchInput');
-  const clearBtn = document.getElementById('btnClearSearch');
-
-  searchInput.addEventListener('input', (e) => {
-    const query = e.target.value.toLowerCase().trim();
-    clearBtn.classList.toggle('hidden', !query);
-    filterFileTree(query);
-  });
-
-  clearBtn.addEventListener('click', () => {
-    searchInput.value = '';
-    clearBtn.classList.add('hidden');
-    filterFileTree('');
-  });
-}
-
-function filterFileTree(query) {
-  document.querySelectorAll('.tree-file').forEach(el => {
-    const path = el.dataset.path.toLowerCase();
-    const match = !query || path.includes(query);
-    el.style.display = match ? 'flex' : 'none';
-  });
-}
-
-window.addEventListener('DOMContentLoaded', initExplorer);
+window.FileExplorer = FileExplorer;
