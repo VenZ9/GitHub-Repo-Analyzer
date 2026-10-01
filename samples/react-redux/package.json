@@ -1,0 +1,11 @@
+{
+  "name": "react-redux-dashboard",
+  "version": "1.0.0",
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@reduxjs/toolkit": "^2.2.1",
+    "react-redux": "^9.1.0",
+    "lucide-react": "^0.359.0"
+  }
+}

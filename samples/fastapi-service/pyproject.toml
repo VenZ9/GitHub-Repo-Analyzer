@@ -1,0 +1,9 @@
+[project]
+name = "fastapi-rag-search"
+version = "0.2.0"
+description = "FastAPI Vector Knowledge Base & Semantic Search Service"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "pydantic>=2.6.0"
+]
