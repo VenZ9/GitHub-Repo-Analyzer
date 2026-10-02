@@ -1,0 +1,4 @@
+# Project DNA Python Dependencies
+# The core application runs on Python 3 standard library.
+# Including requests for external API handling:
+requests>=2.31.0
